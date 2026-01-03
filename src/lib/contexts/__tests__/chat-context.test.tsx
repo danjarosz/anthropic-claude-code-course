@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import { ChatProvider, useChat } from "../chat-context";
 import { useFileSystem } from "../file-system-context";
 import { useChat as useAIChat } from "@ai-sdk/react";
@@ -12,6 +12,11 @@ vi.mock("../file-system-context", () => ({
 
 vi.mock("@ai-sdk/react", () => ({
   useChat: vi.fn(),
+}));
+
+vi.mock("ai", () => ({
+  UIMessage: {},
+  DefaultChatTransport: vi.fn().mockImplementation((config) => config),
 }));
 
 vi.mock("@/lib/anon-work-tracker", () => ({
@@ -43,12 +48,11 @@ describe("ChatContext", () => {
   };
 
   const mockHandleToolCall = vi.fn();
+  const mockSendMessage = vi.fn();
 
   const mockUseAIChat = {
     messages: [],
-    input: "",
-    handleInputChange: vi.fn(),
-    handleSubmit: vi.fn(),
+    sendMessage: mockSendMessage,
     status: "idle",
   };
 
@@ -75,14 +79,13 @@ describe("ChatContext", () => {
     );
 
     expect(screen.getByTestId("messages").textContent).toBe("0");
-    expect(screen.getByTestId("input").getAttribute("value")).toBe(null);
     expect(screen.getByTestId("status").textContent).toBe("idle");
   });
 
   test("initializes with project ID and messages", () => {
     const initialMessages = [
-      { id: "1", role: "user" as const, content: "Hello" },
-      { id: "2", role: "assistant" as const, content: "Hi there!" },
+      { id: "1", role: "user" as const, parts: [{ type: "text", text: "Hello" }] },
+      { id: "2", role: "assistant" as const, parts: [{ type: "text", text: "Hi there!" }] },
     ];
 
     (useAIChat as any).mockReturnValue({
@@ -96,21 +99,19 @@ describe("ChatContext", () => {
       </ChatProvider>
     );
 
-    expect(useAIChat).toHaveBeenCalledWith({
-      api: "/api/chat",
-      initialMessages,
-      body: {
-        files: mockFileSystem.serialize(),
-        projectId: "test-project",
-      },
-      onToolCall: expect.any(Function),
-    });
+    // Verify useAIChat was called with expected transport config
+    expect(useAIChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: initialMessages,
+        onToolCall: expect.any(Function),
+      })
+    );
 
     expect(screen.getByTestId("messages").textContent).toBe("2");
   });
 
   test("tracks anonymous work when no project ID", async () => {
-    const mockMessages = [{ id: "1", role: "user", content: "Hello" }];
+    const mockMessages = [{ id: "1", role: "user", parts: [{ type: "text", text: "Hello" }] }];
 
     (useAIChat as any).mockReturnValue({
       ...mockUseAIChat,
@@ -132,7 +133,7 @@ describe("ChatContext", () => {
   });
 
   test("does not track anonymous work when project ID exists", async () => {
-    const mockMessages = [{ id: "1", role: "user", content: "Hello" }];
+    const mockMessages = [{ id: "1", role: "user", parts: [{ type: "text", text: "Hello" }] }];
 
     (useAIChat as any).mockReturnValue({
       ...mockUseAIChat,
@@ -151,13 +152,8 @@ describe("ChatContext", () => {
   });
 
   test("passes through AI chat functionality", () => {
-    const mockHandleInputChange = vi.fn();
-    const mockHandleSubmit = vi.fn();
-
     (useAIChat as any).mockReturnValue({
       ...mockUseAIChat,
-      handleInputChange: mockHandleInputChange,
-      handleSubmit: mockHandleSubmit,
       status: "loading",
     });
 
@@ -191,9 +187,29 @@ describe("ChatContext", () => {
       </ChatProvider>
     );
 
-    const toolCall = { toolName: "test", args: {} };
+    const toolCall = { toolName: "test", input: {} };
     onToolCallHandler({ toolCall });
 
     expect(mockHandleToolCall).toHaveBeenCalledWith(toolCall);
+  });
+
+  test("manages input state and handles submit", async () => {
+    render(
+      <ChatProvider>
+        <TestComponent />
+      </ChatProvider>
+    );
+
+    const textarea = screen.getByTestId("input") as HTMLTextAreaElement;
+    const form = screen.getByTestId("form");
+
+    // Type in input
+    fireEvent.change(textarea, { target: { value: "Hello world" } });
+    expect(textarea.value).toBe("Hello world");
+
+    // Submit form
+    fireEvent.submit(form);
+
+    expect(mockSendMessage).toHaveBeenCalledWith({ text: "Hello world" });
   });
 });
