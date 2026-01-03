@@ -52,10 +52,7 @@ UIGen is an AI-powered React component generator with live preview. Users descri
 
 ### Database
 
-SQLite database via Prisma (schema in `prisma/schema.prisma`). Prisma client is output to `src/generated/prisma/`.
-
-- **User** - email/password authentication
-- **Project** - stores `messages` (JSON) and `data` (serialized file system) for registered users
+SQLite database via Prisma. Always refer to `prisma/schema.prisma` to understand the data structure. Prisma client is output to `src/generated/prisma/`.
 
 ### Authentication
 
